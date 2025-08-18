@@ -1,54 +1,92 @@
-<!-- src/components/Ranking.vue -->
 <template>
   <div class="ranking-container">
-    <RankingHeader @randomize="randomizeScores" />
-
+    <RankingDate />
     <div class="chart-container">
-      <Bar :data="chartData" :options="chartOptions" />
+      <Bar v-if="items.length" :data="chartData" :options="chartOptions" />
       <div class="chart-hint">※グラフをクリックしてください</div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import RankingDate from '@/components/RankingDate.vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { Bar } from 'vue-chartjs'
-import { elements, type ChartData, type ChartOptions } from 'chart.js'
-import RankingHeader from './RankingHeader.vue'
-import { useRanking, type RankingItem } from '@/composables/useRanking'
+import { type ChartData, type ChartOptions } from 'chart.js'
+import axios from 'axios'
+import { API_ENDPOINTS } from '@/config/api'
 
-const router = useRouter()
-
-const items = ref<RankingItem[]>([
-  { id: 1, team: '大阪', test: 'リポジトリA', score: 8 },
-  { id: 2, team: '東京', test: 'リポジトリA', score: 7 },
-  { id: 3, team: '大阪', test: 'リポジトリB', score: 5 },
-  { id: 4, team: '佐賀', test: 'リポジトリA', score: 4 },
-  { id: 5, team: '佐賀', test: 'リポジトリB', score: 1 },
-  { id: 6, team: '佐賀', test: 'リポジトリC', score: 3 },  
-])
-
-const sortedItems = useRanking(items)
-
-const randomizeScores = () => {
-  items.value.forEach(item => {
-    item.score = Math.floor(Math.random() * 15) + 1
-  })
+type RepoSummary = {
+  repository_name: string
+  status: number
+  current_word: string
+  merged_on: string
 }
 
-const chartData = computed<ChartData<'bar'>>(() => ({
-  labels: sortedItems.value.map((item, idx) =>
-    `${idx === 0 ? '👑 ' : ''}${idx + 1}位 ${item.team}: ${item.test}`
-  ),
-  datasets: [
-    {
-      label: 'スコア',
-      data: sortedItems.value.map(i => i.score),
-      backgroundColor: 'rgba(54, 162, 235, 0.6)',
-    },
-  ],
-}))
+type ProcessedRepoSummary = {
+  repository_name: string
+  shiritori_count: number
+  last_word: string
+  last_merged: string
+}
+
+const router = useRouter()
+const items = ref<ProcessedRepoSummary[]>([])
+
+const fetchSummary = async () => {
+  try {
+    const res = await axios.get<RepoSummary[]>(API_ENDPOINTS.summary)   
+    const repoCounts = res.data.reduce((acc, item) => {
+      if (!acc[item.repository_name]) {
+        acc[item.repository_name] = {
+          repository_name: item.repository_name,
+          shiritori_count: 0,
+          last_word: item.current_word,
+          last_merged: item.merged_on
+        }
+      }
+      acc[item.repository_name].shiritori_count++
+      return acc
+    }, {} as Record<string, any>)
+    
+    items.value = Object.values(repoCounts).sort((a, b) => b.shiritori_count - a.shiritori_count)
+  } catch (err) {
+    console.error('API取得エラー:', err)
+  }
+}
+
+onMounted(fetchSummary)
+
+const chartData = computed<ChartData<'bar'>>(() => {
+  const max = Math.max(...items.value.map(i => i.shiritori_count))
+
+  let prevScore: number | null = null
+  let rank = 1
+  let displayRank = 1
+
+  const labels = items.value.map((item, idx) => {
+    if (item.shiritori_count !== prevScore) {
+      displayRank = rank
+    }
+    const crown = item.shiritori_count === max ? '👑 ' : ''
+    const label = `${crown}${displayRank}位 ${item.repository_name}`
+    prevScore = item.shiritori_count
+    rank++
+    return label
+  })
+
+  return {
+    labels,
+    datasets: [
+      {
+        label: 'しりとり回数',
+        data: items.value.map(i => i.shiritori_count),
+        backgroundColor: 'rgba(75, 192, 192, 0.6)',
+      },
+    ],
+  }
+})
 
 const chartOptions = {
   indexAxis: 'y' as const,
@@ -56,21 +94,50 @@ const chartOptions = {
   maintainAspectRatio: false,
   plugins: {
     legend: { display: false },
-    title: { display: true, text: '順位（リポジトリ別）' },
+    title: { 
+      display: true, 
+      text: '順位（リポジトリ別）',
+      font: {
+        size: window.innerWidth < 768 ? 14 : 16
+      }
+    },
   },
   onClick: (_, elements) => {
     if (!elements.length) return
     const idx = elements[0].index
-    const item = sortedItems.value[idx]
-    router.push({ name: 'Shiritori', params: { id: item.id }} )
+    const item = items.value[idx]
+    router.push({ name: 'Shiritori', params: { id: item.repository_name } })
   },
   onHover: (_evt, elements, chart) => {
     const canvas = chart.canvas as HTMLCanvasElement
     canvas.style.cursor = elements.length ? 'pointer' : 'default'
   },
   scales: {
-    x: { beginAtZero: true, title: { display: true, text: 'スコア' } },
-    y: { title: { display: false } },
+    x: {
+      beginAtZero: true,
+      title: { 
+        display: true, 
+        text: 'しりとり回数',
+        font: {
+          size: window.innerWidth < 768 ? 12 : 14
+        }
+      },
+      ticks: { 
+        stepSize: 1, 
+        precision: 0,
+        font: {
+          size: window.innerWidth < 768 ? 10 : 12
+        }
+      },
+    },
+    y: {
+      title: { display: false },
+      ticks: {
+        font: {
+          size: window.innerWidth < 768 ? 10 : 12
+        }
+      }
+    },
   },
 } satisfies ChartOptions<'bar'>
 </script>
@@ -80,6 +147,9 @@ const chartOptions = {
   max-width: var(--max-width);
   margin: 0 auto;
   padding: var(--gap);
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
 }
 
 .chart-container {
@@ -94,18 +164,90 @@ const chartOptions = {
     0 6px 12px rgba(0, 0, 0, 0.12);
 }
 
-@media (max-width: 600px) {
-  .chart-container {
-    height: 50vh;
-    padding: 12px;
+.chart-hint {
+  margin-top: 30px;
+  text-align: center;
+  color: #666;
+  font-size: 0.9rem;
+}
+
+/* レスポンシブ対応 */
+@media (max-width: 1200px) {
+  .ranking-container {
+    padding: calc(var(--gap) * 0.8);
   }
+  
+  .chart-container {
+    height: min(55vh, 350px);
+    padding: 14px;
+  }
+}
+
+@media (max-width: 768px) {
+  .ranking-container {
+    padding: calc(var(--gap) * 0.6);
+  }
+  
+  .chart-container {
+    height: min(50vh, 300px);
+    padding: 12px;
+    border-radius: 6px;
+  }
+  
   .chart-hint {
-    margin-top: 12px;
+    margin-top: 20px;
     font-size: 0.85rem;
   }
 }
 
-.chart-hint {
-  margin-top: 30px;
+@media (max-width: 600px) {
+  .ranking-container {
+    padding: calc(var(--gap) * 0.5);
+  }
+  
+  .chart-container {
+    height: min(45vh, 250px);
+    padding: 10px;
+    border-radius: 4px;
+  }
+  
+  .chart-hint {
+    margin-top: 16px;
+    font-size: 0.8rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .ranking-container {
+    padding: 12px;
+  }
+  
+  .chart-container {
+    height: min(40vh, 200px);
+    padding: 8px;
+  }
+  
+  .chart-hint {
+    margin-top: 12px;
+    font-size: 0.75rem;
+  }
+}
+
+@media (max-height: 500px) and (orientation: landscape) {
+  .chart-container {
+    height: min(70vh, 300px);
+  }
+  
+  .chart-hint {
+    margin-top: 16px;
+  }
+}
+
+@media (-webkit-min-device-pixel-ratio: 2), (min-resolution: 192dpi) {
+  .chart-container {
+    box-shadow:
+      0 1px 2px rgba(0, 0, 0, 0.1),
+      0 3px 6px rgba(0, 0, 0, 0.15);
+  }
 }
 </style>
