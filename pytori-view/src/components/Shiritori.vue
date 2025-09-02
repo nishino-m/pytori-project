@@ -18,8 +18,10 @@
           🎮 Turn {{ turn.no }}
           <span v-if="turn.label" class="sub-label">({{ turn.label }})</span>
         </div>
-        <span class="arrow">≫</span>
-        <span class="word">しりとりワード：{{ turn.word }}</span>
+        <div class="turn-row">
+          <span class="arrow">≫</span>
+          <span class="word">しりとりワード：{{ turn.word }}</span>
+        </div>
         <div>  
           <p class="status">✅OK!</p>
         </div>
@@ -215,6 +217,12 @@ const goBack = () => {
   gap: 8px;
 }
 
+.turn-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .sub-label {
   font-size: 0.9rem;
   color: #718096;
@@ -226,7 +234,6 @@ const goBack = () => {
   font-size: 1.2rem;
   font-weight: bold;
   margin: 8px 0;
-  display: block;
 }
 
 .word {
@@ -234,7 +241,6 @@ const goBack = () => {
   color: #4a5568;
   font-weight: 600;
   margin: 8px 0;
-  display: block;
 }
 
 .status {
